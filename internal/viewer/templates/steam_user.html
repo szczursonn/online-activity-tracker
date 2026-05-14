@@ -1,0 +1,178 @@
+{{define "title"}}{{if .User.Name}}{{.User.Name}}{{else}}{{.User.ID}}{{end}} |
+Steam Users{{end}} {{define "body"}} {{if .User.ProfileURL}}
+<a
+  href="{{.User.ProfileURL}}"
+  target="_blank"
+  class="mb-4 is-size-3"
+  style="display: flex; align-items: center; justify-content: center; gap: 16px"
+>
+  {{if .User.AvatarURL}}
+  <img
+    src="{{.User.AvatarURL}}"
+    alt="steam user avatar"
+    style="max-width: 100px"
+  />
+  {{end}} {{if .User.Name}}
+  <div>
+    <h2>{{.User.Name}}</h2>
+    <h3 class="is-size-7">SteamID64: {{.User.ID}}</h3>
+  </div>
+  {{else}}
+  <h2>{{.User.ID}} (Steam)</h2>
+  {{end}}
+</a>
+{{else}}
+<h2 class="mb-4 is-size-3">{{.User.ID}}</h2>
+{{end}}
+
+<div id="steam-timeline"></div>
+
+<script id="dataHeartbeat" type="application/json">
+  {{.Heartbeat}}
+</script>
+
+<script id="dataPersonaStateSessions" type="application/json">
+  {{.PersonaStateSessions}}
+</script>
+
+<script id="dataAppSessions" type="application/json">
+  {{.AppSessions}}
+</script>
+
+<script>
+  "use strict";
+  {
+    const dataHeartbeat = new Date(
+      new Date(
+        JSON.parse(document.getElementById("dataHeartbeat").textContent),
+      ).getTime() || Date.now(),
+    );
+    const dataPersonaStateSessions = Object.freeze(
+      JSON.parse(
+        document.getElementById("dataPersonaStateSessions").textContent,
+      ) || [],
+    );
+    const dataAppSessions = Object.freeze(
+      JSON.parse(document.getElementById("dataAppSessions").textContent) || [],
+    );
+
+    const INITIAL_VIEW_SIZE_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+
+    const PERSONA_STATE_TO_LABEL = Object.freeze({
+      0: "Offline",
+      1: "Online",
+      2: "Busy",
+      3: "Away",
+      4: "Snooze",
+      5: "Looking to trade",
+      6: "Looking to play",
+    });
+
+    const PERSONA_STATE_LABEL_TO_COLOR = Object.freeze({
+      Offline: "#808080",
+      Online: "#00ff00",
+      Busy: "#ff0000",
+      Away: "#ffff00",
+    });
+
+    const clampLastByHeartbeat = (start, end) =>
+      new Date(Math.max(+start, +(+end || dataHeartbeat)));
+
+    const personaStateSegments = dataPersonaStateSessions.map((value) => {
+      const start = new Date(value.first_observed_at);
+
+      return {
+        timeRange: [
+          start,
+          clampLastByHeartbeat(start, new Date(value.last_observed_at)),
+        ],
+        val:
+          PERSONA_STATE_TO_LABEL[value.persona_state] ||
+          value.persona_state.toString(),
+      };
+    });
+
+    const appSegmentsByAppID = new Map();
+    for (const value of dataAppSessions) {
+      let list = appSegmentsByAppID.get(value.app_id);
+      if (!list) {
+        list = [];
+        appSegmentsByAppID.set(value.app_id, list);
+      }
+
+      const start = new Date(value.first_observed_at);
+      list.push({
+        timeRange: [
+          start,
+          clampLastByHeartbeat(start, new Date(value.last_observed_at)),
+        ],
+        val: value.app_name || value.app_id,
+      });
+    }
+
+    const chartData = [];
+
+    chartData.push({
+      group: "Persona State",
+      data: [{ label: "Persona State", data: personaStateSegments }],
+    });
+
+    const sortedAppIDs = Array.from(appSegmentsByAppID.keys()).sort((a, b) =>
+      a.localeCompare(b),
+    );
+    if (sortedAppIDs.length > 0) {
+      chartData.push({
+        group: "App",
+        data: sortedAppIDs.map((appID) => {
+          const segments = appSegmentsByAppID.get(appID);
+          return {
+            label: segments[0].val,
+            data: segments,
+          };
+        }),
+      });
+    }
+
+    const zColorScaleCallback = (val) => {
+      const personaStateColor = PERSONA_STATE_LABEL_TO_COLOR[val];
+      if (personaStateColor) {
+        return personaStateColor;
+      }
+
+      const { r, g, b } = oatUtil.hashToRGB(oatUtil.stringToHash(val));
+      return `rgb(${r}, ${g}, ${b})`;
+    };
+
+    const segmentTooltipContentCallback = ({ data: segment }) => {
+      const [start, end] = segment.timeRange;
+      return `<b>${oatUtil.escapeHTML(segment.val)}</b><br>Duration: ${oatUtil.formatDuration(+end - +start)}`;
+    };
+
+    const zoomCallback = () => {
+      chart.zoomY([null, null]);
+    };
+
+    const container = document.getElementById("steam-timeline");
+    const chart = TimelinesChart()(container)
+      .data(chartData)
+      .maxHeight(960)
+      .maxLineHeight(48)
+      .zQualitative(true)
+      .zColorScale(zColorScaleCallback)
+      .useUtc(false)
+      .enableAnimations(false)
+      .zoomX([dataHeartbeat - INITIAL_VIEW_SIZE_MS, dataHeartbeat])
+      .segmentTooltipContent(segmentTooltipContentCallback)
+      .width(container.clientWidth)
+      .onZoom(zoomCallback);
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (container.clientWidth > 0) {
+        chart.width(container.clientWidth);
+      }
+    });
+    resizeObserver.observe(container);
+  }
+</script>
+
+{{end}}

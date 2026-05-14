@@ -1,0 +1,27 @@
+{{define "title"}}Steam Users{{end}} {{define "body"}}
+<h2 class="is-size-2 mb-4">Steam Users</h2>
+<div class="grid">
+  {{range .Users}}
+  <div class="cell">
+    <a class="card" href="/steam/users/{{.ID}}">
+      {{if .AvatarURL}}
+      <div class="card-image">
+        <figure class="image is-1by1">
+          <img src="{{.AvatarURL}}" alt="steam user avatar" />
+        </figure>
+      </div>
+      {{end}}
+      <div class="card-content">
+        <div class="media">
+          <div class="media-content">
+            <p class="title is-4 has-text-centered">
+              {{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}
+            </p>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  {{end}}
+</div>
+{{end}}

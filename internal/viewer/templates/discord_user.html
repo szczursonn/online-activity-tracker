@@ -1,0 +1,326 @@
+{{define "title"}}{{if .User.Name}}{{.User.Name}}{{else}}{{.User.ID}}{{end}} |
+Discord Users{{end}} {{define "body"}}
+<div
+  class="mb-4 is-size-3"
+  style="display: flex; align-items: center; justify-content: center; gap: 16px"
+>
+  {{if .User.AvatarURL}}
+  <img
+    src="{{.User.AvatarURL}}"
+    alt="discord user avatar"
+    style="max-width: 100px"
+  />
+  {{end}} {{if .User.Name}}
+  <div>
+    <h2>{{.User.Name}}</h2>
+    <h3 class="is-size-7">Discord ID: {{.User.ID}}</h3>
+  </div>
+
+  {{else}}
+  <h2>{{.User.ID}} (Discord)</h2>
+  {{end}}
+</div>
+
+<div id="discord-timeline"></div>
+
+<div class="mt-5">
+  <h4 class="is-size-4">Show activities</h4>
+  <button id="discord-activity-show-all" type="button">Show all</button>
+  <button id="discord-activity-hide-all" type="button">Hide all</button>
+  <div
+    id="discord-activity-checkboxes"
+    class="is-flex is-flex-direction-column"
+  ></div>
+</div>
+
+<script id="dataHeartbeat" type="application/json">
+  {{.Heartbeat}}
+</script>
+
+<script id="dataStatusSessions" type="application/json">
+  {{.StatusSessions}}
+</script>
+
+<script id="dataActivitySessions" type="application/json">
+  {{.ActivitySessions}}
+</script>
+
+<script id="dataVoiceSessions" type="application/json">
+  {{.VoiceSessions}}
+</script>
+
+<script>
+  "use strict";
+  {
+    const dataHeartbeat = new Date(
+      new Date(
+        JSON.parse(document.getElementById("dataHeartbeat").textContent),
+      ).getTime() || Date.now(),
+    );
+    const dataStatusSessions = Object.freeze(
+      JSON.parse(document.getElementById("dataStatusSessions").textContent) ||
+        [],
+    );
+    const dataActivitySessions = Object.freeze(
+      JSON.parse(document.getElementById("dataActivitySessions").textContent) ||
+        [],
+    );
+    const dataVoiceSessions = Object.freeze(
+      JSON.parse(document.getElementById("dataVoiceSessions").textContent) ||
+        [],
+    );
+
+    const INITIAL_VIEW_SIZE_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+
+    const STATUS_TO_LABEL = Object.freeze({
+      0: "Online",
+      1: "DND",
+      2: "Idle",
+      3: "Offline",
+    });
+
+    const STATUS_TO_COLOR = Object.freeze({
+      Online: "#00ff00",
+      DND: "#ff0000",
+      Idle: "#ffff00",
+      Offline: "#808080",
+    });
+
+    const SEGMENT_KIND = Object.freeze({
+      STATUS: 1,
+      ACTIVITY: 2,
+      VOICE: 3,
+    });
+
+    const clampEndByHeartbeat = (start, end) =>
+      new Date(Math.max(+start, +(+end || dataHeartbeat)));
+
+    const statusSegments = dataStatusSessions.map((value) => {
+      const start = new Date(value.start_observed_at);
+
+      return {
+        timeRange: [
+          start,
+          clampEndByHeartbeat(start, new Date(value.end_observed_at)),
+        ],
+        val:
+          STATUS_TO_LABEL[
+            Math.min(
+              value.desktop_status,
+              value.mobile_status,
+              value.web_status,
+            )
+          ] || STATUS_TO_LABEL[3],
+        _kind: SEGMENT_KIND.STATUS,
+        _status: value,
+      };
+    });
+
+    const activitySegmentsByName = new Map();
+    for (const value of dataActivitySessions) {
+      let list = activitySegmentsByName.get(value.name);
+      if (!list) {
+        list = [];
+        activitySegmentsByName.set(value.name, list);
+      }
+
+      const start = new Date(value.start_observed_at);
+      list.push({
+        timeRange: [
+          start,
+          clampEndByHeartbeat(start, new Date(value.end_observed_at)),
+        ],
+        val: value.name,
+        _kind: SEGMENT_KIND.ACTIVITY,
+        _activity: value,
+      });
+    }
+
+    const voiceSegmentsByGuildID = new Map();
+    const guildNameByID = {};
+    for (const value of dataVoiceSessions) {
+      guildNameByID[value.guild_id] =
+        value.guild_name || value.guild_id.toString();
+
+      let list = voiceSegmentsByGuildID.get(value.guild_id);
+      if (!list) {
+        list = [];
+        voiceSegmentsByGuildID.set(value.guild_id, list);
+      }
+
+      const start = new Date(value.start_observed_at);
+      list.push({
+        timeRange: [
+          start,
+          clampEndByHeartbeat(start, new Date(value.end_observed_at)),
+        ],
+        val: value.channel_name || value.channel_id.toString(),
+        _kind: SEGMENT_KIND.VOICE,
+        _voice: value,
+      });
+    }
+
+    const chartData = [];
+
+    chartData.push({
+      group: "Status",
+      data: [{ label: "Status", data: statusSegments }],
+    });
+
+    const sortedActivityNames = Array.from(activitySegmentsByName.keys()).sort(
+      (a, b) => a.localeCompare(b),
+    );
+    if (sortedActivityNames.length > 0) {
+      chartData.push({
+        group: "Activity",
+        data: sortedActivityNames.map((name) => ({
+          label: name,
+          data: activitySegmentsByName.get(name),
+        })),
+      });
+    }
+
+    const sortedVoiceGuildIDs = Array.from(voiceSegmentsByGuildID.keys()).sort(
+      (a, b) => guildNameByID[a].localeCompare(guildNameByID[b]),
+    );
+    if (sortedVoiceGuildIDs.length > 0) {
+      chartData.push({
+        group: "Voice",
+        data: sortedVoiceGuildIDs.map((guildID) => ({
+          label: guildNameByID[guildID],
+          data: voiceSegmentsByGuildID.get(guildID),
+        })),
+      });
+    }
+
+    const zColorScaleCallback = (val) => {
+      const statusColor = STATUS_TO_COLOR[val];
+      if (statusColor) {
+        return statusColor;
+      }
+
+      const { r, g, b } = oatUtil.hashToRGB(oatUtil.stringToHash(val));
+      return `rgb(${r}, ${g}, ${b})`;
+    };
+
+    const segmentTooltipContentCallback = ({ data: segment }) => {
+      const lines = [];
+      lines.push(`<b>${oatUtil.escapeHTML(segment.val)}</b>`);
+
+      switch (segment._kind) {
+        case SEGMENT_KIND.STATUS:
+          lines.push(
+            `Desktop: ${oatUtil.escapeHTML(STATUS_TO_LABEL[segment._status.desktop_status] || segment._status.desktop_status)}`,
+          );
+          lines.push(
+            `Mobile: ${oatUtil.escapeHTML(STATUS_TO_LABEL[segment._status.mobile_status] || segment._status.mobile_status)}`,
+          );
+          lines.push(
+            `Web: ${oatUtil.escapeHTML(STATUS_TO_LABEL[segment._status.web_status] || segment._status.web_status)}`,
+          );
+          break;
+        case SEGMENT_KIND.ACTIVITY:
+          if (segment._activity.details) {
+            lines.push(oatUtil.escapeHTML(segment._activity.details));
+          }
+          if (segment._activity.state) {
+            lines.push(oatUtil.escapeHTML(segment._activity.state));
+          }
+          break;
+      }
+
+      const [start, end] = segment.timeRange;
+      lines.push(`Duration: ${oatUtil.formatDuration(+end - +start)}`);
+
+      return lines.join("<br>");
+    };
+
+    const zoomCallback = () => {
+      chart.zoomY([null, null]);
+    };
+
+    const container = document.getElementById("discord-timeline");
+    const chart = TimelinesChart()(container)
+      .data(chartData)
+      .maxHeight(960)
+      .maxLineHeight(48)
+      .zQualitative(true)
+      .zColorScale(zColorScaleCallback)
+      .useUtc(false)
+      .enableAnimations(false)
+      .zoomX([dataHeartbeat - INITIAL_VIEW_SIZE_MS, dataHeartbeat])
+      .segmentTooltipContent(segmentTooltipContentCallback)
+      .width(container.clientWidth)
+      .onZoom(zoomCallback);
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (container.clientWidth > 0) {
+        chart.width(container.clientWidth);
+      }
+    });
+    resizeObserver.observe(container);
+
+    const checkboxesContainer = document.getElementById(
+      "discord-activity-checkboxes",
+    );
+    const getAllCheckboxElements = () =>
+      Array.from(checkboxesContainer.querySelectorAll("input"));
+
+    const filterChartData = () => {
+      const hiddenActivityNames = getAllCheckboxElements()
+        .map((el) => (el.checked ? null : el.dataset.activityName))
+        .filter(Boolean);
+
+      const filteredChartData = [...chartData];
+      const activityGroupIdx = filteredChartData.findIndex(
+        (x) => x.group === "Activity",
+      );
+      if (activityGroupIdx === -1) {
+        return;
+      }
+
+      const filteredActivityDataEntries = filteredChartData[
+        activityGroupIdx
+      ].data.filter(
+        (dataEntry) => !hiddenActivityNames.includes(dataEntry.label),
+      );
+
+      filteredChartData[activityGroupIdx] = {
+        ...filteredChartData[activityGroupIdx],
+        data: filteredActivityDataEntries,
+      };
+
+      chart.data(filteredChartData);
+    };
+
+    document
+      .getElementById("discord-activity-show-all")
+      .addEventListener("click", () => {
+        getAllCheckboxElements().forEach((el) => (el.checked = true));
+        filterChartData();
+      });
+
+    document
+      .getElementById("discord-activity-hide-all")
+      .addEventListener("click", () => {
+        getAllCheckboxElements().forEach((el) => (el.checked = false));
+        filterChartData();
+      });
+
+    for (const name of sortedActivityNames) {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.activityName = name;
+      input.checked = true;
+      input.addEventListener("change", filterChartData);
+
+      const label = document.createElement("label");
+      label.appendChild(input);
+      label.append(name);
+
+      checkboxesContainer.appendChild(label);
+    }
+  }
+</script>
+
+{{end}}

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{template "title" .}} | online-activity-tracker</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/bulma/1.0.4/css/bulma.min.css"
+      integrity="sha512-yh2RE0wZCVZeysGiqTwDTO/dKelCbS9bP2L94UvOFtl/FKXcNAje3Y2oBg/ZMZ3LS1sicYk4dYVGtDex75fvvA=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+    <script
+      src="https://cdn.jsdelivr.net/npm/timelines-chart@2.14.3/dist/timelines-chart.min.js"
+      integrity="sha256-GrS0BHWJX3gTvebZDz/GDToEQvoJ1v3qStg3xCCuYdo="
+      crossorigin="anonymous"
+    ></script>
+    <style>
+      .timelines-chart {
+        background-color: whitesmoke;
+        border-radius: 5px;
+      }
+    </style>
+    <script>
+      "use strict";
+      window.oatUtil = (() => {
+        const hashToRGB = (hash) => {
+          let n = Math.imul(hash ^ (hash >>> 16), 2246822507);
+          n = Math.imul(n ^ (n >>> 13), 3266489909);
+          n ^= n >>> 16;
+
+          return {
+            r: (n >>> 16) & 0xff,
+            g: (n >>> 8) & 0xff,
+            b: n & 0xff,
+          };
+        };
+
+        const stringToHash = (str) => {
+          str = String(str);
+          let hash = 5381;
+          for (let i = 0; i < str.length; i++) {
+            hash = (Math.imul(hash, 33) ^ str.charCodeAt(i)) | 0;
+          }
+          return hash;
+        };
+
+        const formatDuration = (ms) => {
+          if (ms < 1000) {
+            return `${Math.max(ms, 0)}ms`;
+          }
+
+          const s = Math.floor(ms / 1000);
+          const days = Math.floor(s / 86400);
+          const hours = Math.floor((s % 86400) / 3600);
+          const minutes = Math.floor((s % 3600) / 60);
+          const seconds = s % 60;
+
+          const parts = [];
+          if (days > 0) {
+            parts.push(`${days}d`);
+          }
+          if (hours > 0) {
+            parts.push(`${hours}h`);
+          }
+          if (minutes > 0) {
+            parts.push(`${minutes}m`);
+          }
+          if (seconds > 0 && days === 0) {
+            parts.push(`${seconds}s`);
+          }
+
+          return parts.join(" ") || "0s";
+        };
+
+        const escapeHTML = (s) => {
+          return String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        };
+
+        return Object.freeze({
+          hashToRGB,
+          stringToHash,
+          formatDuration,
+          escapeHTML,
+        });
+      })();
+    </script>
+  </head>
+  <body style="margin-left: 5%; margin-right: 5%">
+    <header class="mb-4">
+      <a href="/">
+        <h1 class="is-size-1 has-text-centered">online-activity-tracker</h1>
+      </a>
+    </header>
+    <hr />
+    <main>{{template "body" .}}</main>
+  </body>
+</html>
