@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -91,10 +92,10 @@ func run() int {
 		return 1
 	}
 
-	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancelCtx := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
 	go func() {
-		// ensure subsequent interrupts insta-kill the app
+		// ensure subsequent signals insta-kill the app
 		<-ctx.Done()
 		cancelCtx()
 	}()
