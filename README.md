@@ -73,6 +73,6 @@ oat run steam discord view
 ## Build
 
 ```bash
-# CGO free!
+# CGO free! 🎉🎉🎉
 go build -o oat cmd/app/main.go
 ```
