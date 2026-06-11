@@ -1,3 +1,5 @@
-oat.toml
-oat.db*
+*.toml
+*.db*
+*.exe
 tmp/
+data/

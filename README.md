@@ -76,3 +76,34 @@ oat run steam discord view
 # CGO free! 🎉🎉🎉
 go build -o oat cmd/app/main.go
 ```
+
+## Docker
+
+Config and database live inside `/data` mount.
+
+1. Create a `./data` directory and put `oat.toml` inside it. Ensure uid `65532`, has read/write access to it:
+
+```bash
+mkdir -p data
+sudo chown -R 65532:65532 data
+```
+
+2. Build the image:
+
+```bash
+docker build -t oat .
+```
+
+3. Follow setup steps 2-3 in [Running](#running), replacing `oat` with `docker run --rm -v ./data:/data oat`
+
+4. Start the container (long-lived):
+
+```bash
+docker run -d --name oat \
+  -p 8080:8080 \
+  -v ./data:/data \
+  --restart unless-stopped \
+  oat run steam discord view
+```
+
+(port mapping is not required if not using `view` service)

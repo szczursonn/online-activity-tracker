@@ -1,0 +1,9 @@
+.git
+.gitignore
+*.db*
+*.exe
+oat.toml
+tmp/
+data/
+docs/
+README.md
