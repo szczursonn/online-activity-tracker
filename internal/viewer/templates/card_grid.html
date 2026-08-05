@@ -1,0 +1,51 @@
+{{define "title"}}{{.Title}}{{end}} {{define "body"}}
+<h2 class="is-size-2 has-text-centered has-text-weight-semibold mb-4">
+  {{.Title}}
+</h2>
+<input
+  id="card-grid-search"
+  class="input mb-4"
+  type="search"
+  placeholder="Search"
+/>
+<div class="fixed-grid has-3-cols-mobile has-6-cols-tablet has-10-cols-desktop">
+  <div id="card-grid" class="grid">
+    {{range .Items}}
+    <div class="cell" data-name="{{.Name}}">
+      <a class="card" href="{{.Href}}">
+        <div class="card-image">
+          <figure class="image is-1by1">
+            <img src="{{.ImageURL}}" alt="{{.ImageAlt}}" />
+          </figure>
+        </div>
+        <div class="card-content">
+          <div class="media">
+            <div class="media-content">
+              <p
+                class="title is-size-5-tablet is-size-6-mobile has-text-centered"
+              >
+                {{.Name}}
+              </p>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {{end}}
+  </div>
+</div>
+
+<script>
+  "use strict";
+  document
+    .getElementById("card-grid-search")
+    .addEventListener("input", (event) => {
+      const searchPhrase = event.currentTarget.value.trim().toLowerCase();
+
+      document.querySelectorAll("#card-grid > .cell").forEach((el) => {
+        const match = el.dataset.name.toLowerCase().includes(searchPhrase);
+        el.classList[match ? "remove" : "add"]("is-hidden");
+      });
+    });
+</script>
+{{end}}

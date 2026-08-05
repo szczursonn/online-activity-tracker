@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{template "title" .}} | online-activity-tracker</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png" />
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/bulma/1.0.4/css/bulma.min.css"
@@ -11,93 +12,61 @@
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     />
-    <script
-      src="https://cdn.jsdelivr.net/npm/timelines-chart@2.14.3/dist/timelines-chart.min.js"
-      integrity="sha256-GrS0BHWJX3gTvebZDz/GDToEQvoJ1v3qStg3xCCuYdo="
-      crossorigin="anonymous"
-    ></script>
     <style>
-      .timelines-chart {
-        background-color: whitesmoke;
-        border-radius: 5px;
+      @view-transition {
+        navigation: auto;
+      }
+
+      ::view-transition-old(root),
+      ::view-transition-new(root) {
+        animation-duration: 100ms;
+        animation-timing-function: ease;
       }
     </style>
-    <script>
-      "use strict";
-      window.oatUtil = (() => {
-        const hashToRGB = (hash) => {
-          let n = Math.imul(hash ^ (hash >>> 16), 2246822507);
-          n = Math.imul(n ^ (n >>> 13), 3266489909);
-          n ^= n >>> 16;
-
-          return {
-            r: (n >>> 16) & 0xff,
-            g: (n >>> 8) & 0xff,
-            b: n & 0xff,
-          };
-        };
-
-        const stringToHash = (str) => {
-          str = String(str);
-          let hash = 5381;
-          for (let i = 0; i < str.length; i++) {
-            hash = (Math.imul(hash, 33) ^ str.charCodeAt(i)) | 0;
-          }
-          return hash;
-        };
-
-        const formatDuration = (ms) => {
-          if (ms < 1000) {
-            return `${Math.max(ms, 0)}ms`;
-          }
-
-          const s = Math.floor(ms / 1000);
-          const days = Math.floor(s / 86400);
-          const hours = Math.floor((s % 86400) / 3600);
-          const minutes = Math.floor((s % 3600) / 60);
-          const seconds = s % 60;
-
-          const parts = [];
-          if (days > 0) {
-            parts.push(`${days}d`);
-          }
-          if (hours > 0) {
-            parts.push(`${hours}h`);
-          }
-          if (minutes > 0) {
-            parts.push(`${minutes}m`);
-          }
-          if (seconds > 0 && days === 0) {
-            parts.push(`${seconds}s`);
-          }
-
-          return parts.join(" ") || "0s";
-        };
-
-        const escapeHTML = (s) => {
-          return String(s)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;");
-        };
-
-        return Object.freeze({
-          hashToRGB,
-          stringToHash,
-          formatDuration,
-          escapeHTML,
-        });
-      })();
-    </script>
+    {{block "head" .}}{{end}}
   </head>
   <body style="margin-left: 5%; margin-right: 5%">
     <header class="mb-4">
-      <a href="/">
-        <h1 class="is-size-1 has-text-centered">online-activity-tracker</h1>
-      </a>
+      <h1
+        class="is-size-1-tablet is-size-3-mobile has-text-centered has-text-weight-semibold mb-2"
+      >
+        online-activity-tracker
+      </h1>
+      <nav class="columns is-mobile is-multiline is-variable is-1">
+        {{range navLinks}}
+        <div class="column is-half-mobile">
+          <a href="{{.Href}}" class="box media is-align-items-center">
+            <figure class="media-left image is-32x32">
+              <img src="{{.IconURL}}" alt="{{.IconAlt}}" />
+            </figure>
+            <div class="media-content">
+              <p class="title is-5 is-size-6-mobile">{{.Label}}</p>
+            </div>
+          </a>
+        </div>
+        {{end}}
+      </nav>
     </header>
     <hr />
     <main>{{template "body" .}}</main>
+    <a
+      href="https://github.com/szczursonn/online-activity-tracker"
+      target="_blank"
+      rel="noopener"
+      style="
+        position: fixed;
+        top: 0.5rem;
+        right: 0.75rem;
+        z-index: 50;
+        filter: invert(1);
+        opacity: 20%;
+      "
+    >
+      <img
+        src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg"
+        alt="github logo"
+        width="32"
+      />
+    </a>
   </body>
 </html>

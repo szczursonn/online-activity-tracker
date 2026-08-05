@@ -3,9 +3,10 @@ package viewer
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
-	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -14,8 +15,8 @@ import (
 
 const errPrefix = "viewer: "
 
-//go:embed templates/*.html
-var templatesFS embed.FS
+//go:embed static
+var staticFS embed.FS
 
 type ServerOptions struct {
 	Logger     *slog.Logger
@@ -25,7 +26,7 @@ type ServerOptions struct {
 
 func (opts *ServerOptions) validateAndApplyDefaults() error {
 	if opts.Logger == nil {
-		opts.Logger = slog.Default()
+		opts.Logger = slog.New(slog.DiscardHandler)
 	}
 
 	if opts.DB == nil {
@@ -33,23 +34,17 @@ func (opts *ServerOptions) validateAndApplyDefaults() error {
 	}
 
 	if opts.ListenAddr == "" {
-		opts.ListenAddr = ":8080"
+		return fmt.Errorf(errPrefix + "missing listen addr")
 	}
 
 	return nil
 }
 
 type Server struct {
-	logger *slog.Logger
-	db     *db.DB
-	srv    *http.Server
-
-	homeTemplate         *template.Template
-	steamUsersTemplate   *template.Template
-	steamUserTemplate    *template.Template
-	steamAppTemplate     *template.Template
-	discordUsersTemplate *template.Template
-	discordUserTemplate  *template.Template
+	logger   *slog.Logger
+	db       *db.DB
+	srv      *http.Server
+	listener net.Listener
 }
 
 func NewServer(opts *ServerOptions) (*Server, error) {
@@ -59,19 +54,27 @@ func NewServer(opts *ServerOptions) (*Server, error) {
 
 	s := &Server{
 		db:     opts.DB,
-		logger: opts.Logger.With(slog.String("module", "viewer")),
+		logger: opts.Logger,
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", s.handleHome)
-	mux.HandleFunc("GET /steam/users", s.handleSteamUsers)
-	mux.HandleFunc("GET /steam/users/{userID}", s.handleSteamUser)
-	mux.HandleFunc("GET /steam/apps/{appID}", s.handleSteamApp)
-	mux.HandleFunc("GET /discord/users", s.handleDiscordUsers)
-	mux.HandleFunc("GET /discord/users/{userID}", s.handleDiscordUser)
+	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS)))
+
+	registerHomePage(s, mux)
+	registerDiscordUsersPage(s, mux)
+	registerDiscordUserPage(s, mux)
+	registerDiscordGuildsPage(s, mux)
+	registerDiscordGuildPage(s, mux)
+	registerSteamUsersPage(s, mux)
+	registerSteamUserPage(s, mux)
+	registerSteamAppsPage(s, mux)
+	registerSteamAppPage(s, mux)
+
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		respondNotFound(w)
+	})
 
 	s.srv = &http.Server{
-		Addr:              opts.ListenAddr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       5 * time.Second,
@@ -80,49 +83,37 @@ func NewServer(opts *ServerOptions) (*Server, error) {
 	}
 
 	var err error
-	s.homeTemplate, err = template.ParseFS(templatesFS, "templates/_layout.html", "templates/home.html")
+	s.listener, err = net.Listen("tcp", opts.ListenAddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse home html template: %w", err)
-	}
-
-	s.steamUsersTemplate, err = template.ParseFS(templatesFS, "templates/_layout.html", "templates/steam_users.html")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse steam users html template: %w", err)
-	}
-
-	s.steamUserTemplate, err = template.ParseFS(templatesFS, "templates/_layout.html", "templates/steam_user.html")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse steam user html template: %w", err)
-	}
-
-	s.steamAppTemplate, err = template.ParseFS(templatesFS, "templates/_layout.html", "templates/steam_app.html")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse steam app html template: %w", err)
-	}
-
-	s.discordUsersTemplate, err = template.ParseFS(templatesFS, "templates/_layout.html", "templates/discord_users.html")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse discord users html template: %w", err)
-	}
-
-	s.discordUserTemplate, err = template.ParseFS(templatesFS, "templates/_layout.html", "templates/discord_user.html")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse discord user html template: %w", err)
+		return nil, fmt.Errorf(errPrefix+"listening on %q: %w", opts.ListenAddr, err)
 	}
 
 	return s, nil
 }
 
-func (s *Server) ListenAndServe() error {
-	return s.srv.ListenAndServe()
+func (s *Server) Close() {
+	s.srv.Shutdown(context.Background())
+	s.listener.Close()
+}
+
+func (s *Server) Run(ctx context.Context) error {
+	errCh := make(chan error, 1)
+	go func() {
+		if err := s.srv.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf(errPrefix+"serving: %w", err)
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return nil
+	}
 }
 
 func (s *Server) ListenAddr() string {
-	return s.srv.Addr
-}
-
-func (s *Server) Shutdown() {
-	s.srv.Shutdown(context.Background())
+	return s.listener.Addr().String()
 }
 
 func respondInternalServerError(w http.ResponseWriter) {

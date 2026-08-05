@@ -28,7 +28,7 @@ type TrackerOptions struct {
 
 func (opts *TrackerOptions) validateAndApplyDefaults() error {
 	if opts.Logger == nil {
-		opts.Logger = slog.Default()
+		opts.Logger = slog.New(slog.DiscardHandler)
 	}
 
 	if opts.DB == nil {
@@ -44,15 +44,15 @@ func (opts *TrackerOptions) validateAndApplyDefaults() error {
 	}
 
 	if opts.PollInterval <= 0 {
-		opts.PollInterval = 2 * time.Minute
+		return fmt.Errorf(errPrefix + "missing poll interval")
 	}
 
 	if opts.AppExtraInfoStaleCheckInterval <= 0 {
-		opts.AppExtraInfoStaleCheckInterval = time.Minute
+		return fmt.Errorf(errPrefix + "missing app extra info stale check interval")
 	}
 
 	if opts.AppExtraInfoStaleTime <= 0 {
-		opts.AppExtraInfoStaleTime = 48 * time.Hour
+		return fmt.Errorf(errPrefix + "missing app extra info stale time")
 	}
 
 	return nil
@@ -68,10 +68,6 @@ type Tracker struct {
 	appExtraInfoStaleTime          time.Duration
 
 	hasHeartbeatContinuity bool
-
-	ctx       context.Context
-	cancelCtx context.CancelFunc
-	workerWg  sync.WaitGroup
 }
 
 func NewTracker(opts TrackerOptions) (*Tracker, error) {
@@ -79,46 +75,46 @@ func NewTracker(opts TrackerOptions) (*Tracker, error) {
 		return nil, err
 	}
 
-	t := &Tracker{
-		logger:                         opts.Logger.With(slog.String("module", "steam")),
+	return &Tracker{
+		logger:                         opts.Logger,
 		db:                             opts.DB,
 		webAPI:                         opts.WebAPI,
 		storefrontAPI:                  opts.StorefrontAPI,
 		pollInterval:                   opts.PollInterval,
 		appExtraInfoStaleCheckInterval: opts.AppExtraInfoStaleCheckInterval,
 		appExtraInfoStaleTime:          opts.AppExtraInfoStaleTime,
-	}
-	t.ctx, t.cancelCtx = context.WithCancel(context.Background())
-
-	t.workerWg.Go(t.playerSummariesPollWorker)
-	t.workerWg.Go(t.appDetailsPollWorker)
-
-	return t, nil
+	}, nil
 }
 
-func (t *Tracker) Shutdown() {
-	t.cancelCtx()
-	t.workerWg.Wait()
+func (t *Tracker) Run(ctx context.Context) {
+	var workerWg sync.WaitGroup
+	workerWg.Go(func() {
+		t.playerSummariesPollWorker(ctx)
+	})
+	workerWg.Go(func() {
+		t.appDetailsPollWorker(ctx)
+	})
+	workerWg.Wait()
 }
 
-func (t *Tracker) playerSummariesPollWorker() {
+func (t *Tracker) playerSummariesPollWorker(ctx context.Context) {
 	ticker := time.NewTicker(t.pollInterval)
 	defer ticker.Stop()
 
 	for {
-		t.doPlayerSummariesPoll()
+		t.doPlayerSummariesPoll(ctx)
 
 		select {
-		case <-t.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
 	}
 }
 
-func (t *Tracker) doPlayerSummariesPoll() {
+func (t *Tracker) doPlayerSummariesPoll(pollCtx context.Context) {
 	t.logger.Debug("Polling player summaries")
-	ctx, cancelCtx := context.WithTimeout(t.ctx, time.Minute)
+	ctx, cancelCtx := context.WithTimeout(pollCtx, time.Minute)
 	defer cancelCtx()
 
 	if err := func() error {
@@ -199,24 +195,24 @@ func (t *Tracker) doPlayerSummariesPoll() {
 	}
 }
 
-func (t *Tracker) appDetailsPollWorker() {
+func (t *Tracker) appDetailsPollWorker(ctx context.Context) {
 	ticker := time.NewTicker(t.appExtraInfoStaleCheckInterval)
 	defer ticker.Stop()
 
 	for {
-		t.doAppDetailsRefresh()
+		t.doAppDetailsRefresh(ctx)
 
 		select {
-		case <-t.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
 	}
 }
 
-func (t *Tracker) doAppDetailsRefresh() {
+func (t *Tracker) doAppDetailsRefresh(refreshCtx context.Context) {
 	t.logger.Debug("Refreshing app details")
-	ctx, cancelCtx := context.WithTimeout(t.ctx, time.Minute)
+	ctx, cancelCtx := context.WithTimeout(refreshCtx, time.Minute)
 	defer cancelCtx()
 
 	if err := func() error {

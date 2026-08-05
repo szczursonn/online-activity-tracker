@@ -118,21 +118,14 @@ func GetEnabledUserIDs(tx *db.Tx) ([]uint64, error) {
 	return userIDs, nil
 }
 
-type GetUsersPageDataResult struct {
-	Users []GetUsersPageDataResultUser `json:"users"`
+type GetAllUsersUser struct {
+	ID        uint64
+	Name      string
+	AvatarURL string
 }
 
-type GetUsersPageDataResultUser struct {
-	ID        uint64 `json:"id,string"`
-	Name      string `json:"name,omitempty"`
-	AvatarURL string `json:"avatar_url,omitempty"`
-}
-
-func GetUsersPageData(tx *db.Tx) (*GetUsersPageDataResult, error) {
-	res := &GetUsersPageDataResult{}
-
-	var err error
-	res.Users, err = func() ([]GetUsersPageDataResultUser, error) {
+func GetAllUsers(tx *db.Tx) ([]GetAllUsersUser, error) {
+	users, err := func() ([]GetAllUsersUser, error) {
 		rows, err := tx.Query(`
 			SELECT id, name, avatar_url
 			FROM steam_user
@@ -143,7 +136,7 @@ func GetUsersPageData(tx *db.Tx) (*GetUsersPageDataResult, error) {
 		}
 		defer rows.Close()
 
-		var res []GetUsersPageDataResultUser
+		var users []GetAllUsersUser
 		for rows.Next() {
 			var userID int64
 			var name string
@@ -152,20 +145,63 @@ func GetUsersPageData(tx *db.Tx) (*GetUsersPageDataResult, error) {
 				return nil, err
 			}
 
-			res = append(res, GetUsersPageDataResultUser{
+			users = append(users, GetAllUsersUser{
 				ID:        uint64(userID),
 				Name:      name,
 				AvatarURL: avatarURL,
 			})
 		}
 
-		return res, rows.Err()
+		return users, rows.Err()
 	}()
 	if err != nil {
 		return nil, fmt.Errorf(errPrefix+"getting all users: %w", err)
 	}
 
-	return res, nil
+	return users, nil
+}
+
+type GetAllAppsApp struct {
+	ID             uint64
+	Name           string
+	HeaderImageURL string
+}
+
+func GetAllApps(tx *db.Tx) ([]GetAllAppsApp, error) {
+	apps, err := func() ([]GetAllAppsApp, error) {
+		rows, err := tx.Query(`
+			SELECT id, name, header_image_url
+			FROM steam_app
+			ORDER BY name COLLATE NOCASE ASC, id ASC;
+		`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		var apps []GetAllAppsApp
+		for rows.Next() {
+			var appID int64
+			var name string
+			var headerImageURL string
+			if err := rows.Scan(&appID, &name, &headerImageURL); err != nil {
+				return nil, err
+			}
+
+			apps = append(apps, GetAllAppsApp{
+				ID:             uint64(appID),
+				Name:           name,
+				HeaderImageURL: headerImageURL,
+			})
+		}
+
+		return apps, rows.Err()
+	}()
+	if err != nil {
+		return nil, fmt.Errorf(errPrefix+"getting all apps: %w", err)
+	}
+
+	return apps, nil
 }
 
 func UpdateAppExtraInfo(tx *db.Tx, appID uint64, name string, headerImageURL string, updatedAt time.Time) error {
@@ -201,26 +237,91 @@ func GetLeastUpdatedExtraInfoAppID(tx *db.Tx, maxUpdatedAt time.Time) (uint64, e
 }
 
 type GetAppPageDataResult struct {
+	Heartbeat    time.Time                         `json:"heartbeat,omitzero"`
+	App          GetAppPageDataResultApp           `json:"app"`
+	UserSessions []GetAppPageDataResultUserSession `json:"user_sessions"`
+}
+
+type GetAppPageDataResultApp struct {
 	ID             uint64 `json:"id,string"`
-	Name           string `json:"name"`
-	HeaderImageURL string `json:"header_image_url"`
+	Name           string `json:"name,omitempty"`
+	HeaderImageURL string `json:"header_image_url,omitempty"`
+}
+
+type GetAppPageDataResultUserSession struct {
+	ID              int64     `json:"id,string"`
+	UserID          uint64    `json:"user_id,string"`
+	UserName        string    `json:"user_name,omitempty"`
+	FirstObservedAt time.Time `json:"first_observed_at,omitzero"`
+	LastObservedAt  time.Time `json:"last_observed_at,omitzero"`
 }
 
 func GetAppPageData(tx *db.Tx, appID uint64) (*GetAppPageDataResult, error) {
 	res := &GetAppPageDataResult{
-		ID: appID,
+		App: GetAppPageDataResultApp{
+			ID: appID,
+		},
+	}
+
+	var err error
+	res.Heartbeat, err = GetHeartbeat(tx)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := tx.QueryRow(`
 		SELECT name, header_image_url
 		FROM steam_app
 		WHERE id = ?;
-	`, int64(appID)).Scan(&res.Name, &res.HeaderImageURL); err != nil {
+	`, int64(appID)).Scan(&res.App.Name, &res.App.HeaderImageURL); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, db.ErrNotFound
 		}
 
 		return nil, fmt.Errorf(errPrefix+"getting app %d: %w", appID, err)
+	}
+
+	res.UserSessions, err = func() ([]GetAppPageDataResultUserSession, error) {
+		rows, err := tx.Query(`
+			SELECT ssa.id, su.id, su.name, ssa.first_observed_at, ssa.last_observed_at
+			FROM steam_session_app ssa
+			LEFT JOIN steam_user su ON ssa.user_id = su.id
+			WHERE ssa.app_id = ?;
+		`, int64(appID))
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		entries := []GetAppPageDataResultUserSession{}
+		for rows.Next() {
+			var id int64
+			var userID int64
+			var userName string
+			var firstObservedAtNum int64
+			var lastObservedAtNumPtr *int64
+			if err := rows.Scan(&id, &userID, &userName, &firstObservedAtNum, &lastObservedAtNumPtr); err != nil {
+				return nil, err
+			}
+
+			var lastObservedAt time.Time
+			if lastObservedAtNumPtr != nil {
+				lastObservedAt = time.UnixMilli(*lastObservedAtNumPtr)
+			}
+
+			entries = append(entries, GetAppPageDataResultUserSession{
+				ID:              id,
+				UserID:          uint64(userID),
+				UserName:        userName,
+				FirstObservedAt: time.UnixMilli(firstObservedAtNum),
+				LastObservedAt:  lastObservedAt,
+			})
+		}
+
+		return entries, rows.Err()
+	}()
+	if err != nil {
+		return nil, fmt.Errorf(errPrefix+"getting all user sessions for app %d: %w", appID, err)
 	}
 
 	return res, nil

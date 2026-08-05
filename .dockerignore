@@ -1,9 +1,6 @@
-.git
-.gitignore
-*.db*
-*.exe
-oat.toml
-tmp/
-data/
-docs/
-README.md
+# deny everything, then allow only what the build needs
+*
+!*.go
+!go.mod
+!go.sum
+!internal

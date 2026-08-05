@@ -1,0 +1,40 @@
+{{define "title"}}{{if .Guild.Name}}{{.Guild.Name}}{{else}}{{.Guild.ID}}{{end}}
+| Discord Guilds{{end}} {{define "body"}} {{template "timelinePageHeader"
+.Header}}
+
+<div id="discord-guild-timeline"></div>
+
+<script id="dataHeartbeat" type="application/json">
+  {{.Heartbeat}}
+</script>
+
+<script id="dataVoiceSessions" type="application/json">
+  {{.VoiceSessions}}
+</script>
+
+<script>
+  "use strict";
+  new OatSessionsTimeline({
+    container: document.getElementById("discord-guild-timeline"),
+    groups: [
+      OatSessionsTimeline.buildGroup({
+        label: "Voice",
+        sessions: OatSessionsTimeline.readJSON(
+          document.getElementById("dataVoiceSessions"),
+        ),
+        heartbeat: OatSessionsTimeline.readJSON(
+          document.getElementById("dataHeartbeat"),
+        ),
+        toKey: (session) => session.user_id,
+        toLabel: (session) => session.user_name || session.user_id,
+        toSegment: (session) => ({
+          start: session.start_observed_at,
+          end: session.end_observed_at,
+          val: session.channel_name || session.channel_id,
+        }),
+      }),
+    ],
+  });
+</script>
+
+{{end}}

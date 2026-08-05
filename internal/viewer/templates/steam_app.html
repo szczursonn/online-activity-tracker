@@ -1,16 +1,39 @@
-{{define "title"}}{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}} | Steam
-Apps{{end}} {{define "body"}}
+{{define "title"}}{{if .App.Name}}{{.App.Name}}{{else}}{{.App.ID}}{{end}} |
+Steam Apps{{end}} {{define "body"}} {{template "timelinePageHeader" .Header}}
 
-<a
-  href="https://store.steampowered.com/app/{{.ID}}/"
-  target="_blank"
-  class="mb-4 is-size-3"
-  style="display: flex; align-items: center; justify-content: center; gap: 16px"
->
-  {{if .HeaderImageURL}}
-  <img src="{{.HeaderImageURL}}" alt="app header" />
-  {{end}}
-  <h2>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</h2>
-</a>
+<div id="steam-app-timeline"></div>
+
+<script id="dataHeartbeat" type="application/json">
+  {{.Heartbeat}}
+</script>
+
+<script id="dataUserSessions" type="application/json">
+  {{.UserSessions}}
+</script>
+
+<script>
+  "use strict";
+  new OatSessionsTimeline({
+    container: document.getElementById("steam-app-timeline"),
+    groups: [
+      OatSessionsTimeline.buildGroup({
+        label: "Users",
+        sessions: OatSessionsTimeline.readJSON(
+          document.getElementById("dataUserSessions"),
+        ),
+        heartbeat: OatSessionsTimeline.readJSON(
+          document.getElementById("dataHeartbeat"),
+        ),
+        toKey: (session) => session.user_id,
+        toLabel: (session) => session.user_name || session.user_id,
+        toSegment: (session) => ({
+          start: session.first_observed_at,
+          end: session.last_observed_at,
+          val: session.user_name || session.user_id,
+        }),
+      }),
+    ],
+  });
+</script>
 
 {{end}}

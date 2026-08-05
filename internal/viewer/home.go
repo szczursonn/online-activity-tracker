@@ -1,17 +1,11 @@
 package viewer
 
 import (
-	"log/slog"
 	"net/http"
 )
 
-func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		respondNotFound(w)
-		return
-	}
+var homeTemplate = mustParseTemplate("home.html")
 
-	if err := s.homeTemplate.Execute(w, nil); err != nil {
-		s.logger.Error("Failed to serve home template", slog.Any("err", err))
-	}
+func registerHomePage(s *Server, mux *http.ServeMux) {
+	mux.Handle("GET /{$}", newPageHandler(s, homeTemplate, nil))
 }

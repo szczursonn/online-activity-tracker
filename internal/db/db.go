@@ -18,59 +18,74 @@ type DB struct {
 	sqlReader *sql.DB
 }
 
-func Open(ctx context.Context, dbPath string) (*DB, error) {
-	if dbPath == "" {
-		dbPath = "./oat.db"
+func Open(ctx context.Context, dbFilePath string) (*DB, error) {
+	if dbFilePath == "" {
+		dbFilePath = "./oat.db"
 	}
 
-	writeDSN, readDSN, err := makeSQLiteDSNs(dbPath)
+	writeDSN, readDSN, err := makeDSNs(dbFilePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(errPrefix+"preparing dsn: %w", err)
 	}
 
-	db := &DB{}
-	db.sqlWriter, err = sql.Open("sqlite", writeDSN)
+	sqlWriter, err := sql.Open("sqlite", writeDSN)
 	if err != nil {
-		return nil, fmt.Errorf(errPrefix+"failed to open writer db: %w", err)
+		return nil, fmt.Errorf(errPrefix+"opening write handle: %w", err)
 	}
-	db.sqlWriter.SetMaxOpenConns(1)
+	sqlWriter.SetMaxOpenConns(1)
+	sqlWriter.SetMaxIdleConns(1)
 
-	db.sqlReader, err = sql.Open("sqlite", readDSN)
+	if err := sqlWriter.PingContext(ctx); err != nil {
+		sqlWriter.Close()
+		return nil, fmt.Errorf(errPrefix+"pinging write handle: %w", err)
+	}
+
+	sqlReader, err := sql.Open("sqlite", readDSN)
 	if err != nil {
-		db.sqlWriter.Close()
+		sqlWriter.Close()
 		return nil, fmt.Errorf(errPrefix+"failed to open reader db: %w", err)
 	}
 
-	return db, nil
+	return &DB{
+		sqlReader: sqlReader,
+		sqlWriter: sqlWriter,
+	}, nil
 }
 
-func makeSQLiteDSNs(dbFilePath string) (string, string, error) {
+var writeDSNRawQuery = url.Values{
+	"_pragma": []string{"foreign_keys(ON)", "busy_timeout(5000)", "journal_mode(WAL)", "synchronous(NORMAL)"},
+	"_txlock": []string{"immediate"},
+}.Encode()
+
+var readDSNRawQuery = url.Values{
+	"_pragma": []string{
+		"busy_timeout(5000)",
+		"journal_mode(WAL)",
+		"query_only(1)",
+	},
+	"_txlock": []string{"deferred"},
+}.Encode()
+
+func makeDSNs(dbFilePath string) (string, string, error) {
 	abs, err := filepath.Abs(dbFilePath)
 	if err != nil {
 		return "", "", err
 	}
-	p := filepath.ToSlash(abs)
+	resolvedFilePath := filepath.ToSlash(abs)
 	// windows: "C:/foo" -> "/C:/foo"
-	if len(p) > 1 && p[1] == ':' {
-		p = "/" + p
+	if len(resolvedFilePath) > 1 && resolvedFilePath[1] == ':' {
+		resolvedFilePath = "/" + resolvedFilePath
 	}
 
 	u := url.URL{
 		Scheme: "file",
-		Path:   p,
+		Path:   resolvedFilePath,
 	}
 
-	q := url.Values{
-		"_pragma": []string{"foreign_keys(ON)", "busy_timeout(5000)", "journal_mode(WAL)", "synchronous(NORMAL)"},
-		"_txlock": []string{"immediate"},
-	}
-	u.RawQuery = q.Encode()
+	u.RawQuery = writeDSNRawQuery
 	writeDSN := u.String()
 
-	delete(q, "_txlock")
-	q["mode"] = []string{"ro"}
-	u.RawQuery = q.Encode()
-
+	u.RawQuery = readDSNRawQuery
 	return writeDSN, u.String(), nil
 }
 

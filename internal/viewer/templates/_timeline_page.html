@@ -1,0 +1,622 @@
+{{define "timelinePageHeader"}}
+<div class="box oat-page-header mb-4">
+  {{if .ImageURL}}
+  <img class="oat-page-header-image" src="{{.ImageURL}}" alt="{{.ImageAlt}}" />
+  {{end}}
+  <h2 class="is-size-3">{{.Name}}</h2>
+  {{if .URL}}
+  <a class="button is-small" href="{{.URL}}" target="_blank" rel="noopener"
+    >{{or .URLLabel "Profile"}}</a
+  >
+  {{end}}
+</div>
+{{end}} {{define "head"}}
+<script
+  src="https://cdn.jsdelivr.net/npm/timelines-chart@2.14.3/dist/timelines-chart.min.js"
+  integrity="sha256-GrS0BHWJX3gTvebZDz/GDToEQvoJ1v3qStg3xCCuYdo="
+  crossorigin="anonymous"
+></script>
+<style>
+  .timelines-chart {
+    background-color: whitesmoke;
+    border-radius: 5px;
+
+    .reset-zoom-btn {
+      display: none;
+    }
+  }
+
+  .oat-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    border: 1px solid var(--bulma-border, #dbdbdb);
+  }
+
+  .oat-page-header-image {
+    max-height: 100px;
+    border-radius: var(--bulma-radius, 4px);
+  }
+
+  .oat-filter-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.7rem;
+    border: 1px solid var(--bulma-border, #dbdbdb);
+    border-radius: var(--bulma-radius, 4px);
+    background-color: var(--bulma-scheme-main-bis, #fafafa);
+    overflow-wrap: anywhere;
+    transition:
+      background-color 100ms ease,
+      border-color 100ms ease,
+      opacity 100ms ease;
+
+    input {
+      accent-color: var(--bulma-link, #485fc7);
+      flex-shrink: 0;
+      width: 1rem;
+      height: 1rem;
+      margin: 0;
+    }
+
+    &:hover {
+      border-color: var(--bulma-link, #485fc7);
+      background-color: var(--bulma-scheme-main-ter, #f5f5f5);
+    }
+
+    &:has(input:not(:checked)) {
+      opacity: 0.5;
+      border-style: dashed;
+      background-color: transparent;
+    }
+
+    &:has(input:focus-visible) {
+      outline: 2px solid var(--bulma-link, #485fc7);
+      outline-offset: 2px;
+    }
+  }
+</style>
+
+<template id="oatTimelineTemplate">
+  <div class="buttons are-small mb-2" data-oat-presets></div>
+  <p class="has-text-centered has-text-grey mb-2" data-oat-range></p>
+  <div data-oat-chart></div>
+  <p
+    class="has-text-centered my-5 is-hidden has-text-warning"
+    data-oat-empty
+  ></p>
+  <div class="mt-5" data-oat-filters></div>
+</template>
+
+<template id="oatTimelineButtonTemplate">
+  <button type="button" class="button"></button>
+</template>
+
+<template id="oatTimelineFilterGroupTemplate">
+  <div class="mb-4">
+    <h4 class="is-size-4" data-oat-heading></h4>
+    <div class="buttons are-small mb-2" data-oat-bulk></div>
+    <div class="grid" data-oat-checkboxes></div>
+  </div>
+</template>
+
+<template id="oatTimelineCheckboxTemplate">
+  <label class="checkbox oat-filter-chip"
+    ><input type="checkbox" checked
+  /></label>
+</template>
+
+<script>
+  "use strict";
+  class OatSessionsTimeline {
+    static #ZOOM_PRESETS = Object.freeze([
+      { label: "24h", viewSizeMs: 24 * 60 * 60 * 1000 },
+      { label: "48h", viewSizeMs: 2 * 24 * 60 * 60 * 1000 },
+      { label: "7d", viewSizeMs: 7 * 24 * 60 * 60 * 1000 },
+      { label: "30d", viewSizeMs: 30 * 24 * 60 * 60 * 1000 },
+      { label: "90d", viewSizeMs: 90 * 24 * 60 * 60 * 1000 },
+      { label: "1y", viewSizeMs: 365 * 24 * 60 * 60 * 1000 },
+    ]);
+    static #DEFAULT_ZOOM_PRESET = OatSessionsTimeline.#ZOOM_PRESETS[1];
+
+    static #MAX_CHART_HEIGHT_PX = 960;
+    static #LINE_HEIGHT_PX = 48;
+    // for some reason timelines-chart.js explodes when rendering an empty chart so a dummy invisible item is rendered instead
+    static #PLACEHOLDER_LINE_HEIGHT_PX = 1;
+    static #PLACEHOLDER_SEGMENT_VAL = "__oatPlaceholder__";
+
+    static #TIME_RANGE_FORMAT = new Intl.DateTimeFormat("en-gb", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+
+    static #TEMPLATE_ID = "oatTimelineTemplate";
+    static #BUTTON_TEMPLATE_ID = "oatTimelineButtonTemplate";
+    static #FILTER_GROUP_TEMPLATE_ID = "oatTimelineFilterGroupTemplate";
+    static #CHECKBOX_TEMPLATE_ID = "oatTimelineCheckboxTemplate";
+
+    static #hashToRGB(hash) {
+      let n = Math.imul(hash ^ (hash >>> 16), 2246822507);
+      n = Math.imul(n ^ (n >>> 13), 3266489909);
+      n ^= n >>> 16;
+
+      return {
+        r: (n >>> 16) & 0xff,
+        g: (n >>> 8) & 0xff,
+        b: n & 0xff,
+      };
+    }
+
+    static #stringToHash(value) {
+      const str = String(value);
+      let hash = 5381;
+      for (let i = 0; i < str.length; i++) {
+        hash = (Math.imul(hash, 33) ^ str.charCodeAt(i)) | 0;
+      }
+      return hash;
+    }
+
+    static #formatDuration(ms) {
+      if (ms < 1000) {
+        return `${Math.max(ms, 0)}ms`;
+      }
+
+      const s = Math.floor(ms / 1000);
+      const days = Math.floor(s / 86400);
+      const hours = Math.floor((s % 86400) / 3600);
+      const minutes = Math.floor((s % 3600) / 60);
+      const seconds = s % 60;
+
+      const parts = [];
+      if (days > 0) {
+        parts.push(`${days}d`);
+      }
+      if (hours > 0) {
+        parts.push(`${hours}h`);
+      }
+      if (minutes > 0) {
+        parts.push(`${minutes}m`);
+      }
+      if (seconds > 0 && days === 0) {
+        parts.push(`${seconds}s`);
+      }
+
+      return parts.join(" ") || "0s";
+    }
+
+    static #escapeHTML(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    static readJSON(element) {
+      return Object.freeze(JSON.parse(element.textContent));
+    }
+
+    static #cloneTemplate(templateId) {
+      return document.getElementById(templateId).content.cloneNode(true);
+    }
+
+    static #cloneTemplateElement(templateId) {
+      return OatSessionsTimeline.#cloneTemplate(templateId).firstElementChild;
+    }
+
+    static #createButton(text, onClick) {
+      const button = OatSessionsTimeline.#cloneTemplateElement(
+        OatSessionsTimeline.#BUTTON_TEMPLATE_ID,
+      );
+      button.textContent = text;
+      button.addEventListener("click", onClick);
+
+      return button;
+    }
+
+    static #buildSegments(sessions, toSegment, heartbeat) {
+      return sessions.map((session) => {
+        const { start, end, ...rest } = toSegment(session);
+        const startDate = new Date(start);
+
+        return {
+          ...rest,
+          timeRange: [
+            startDate,
+            // an open session has no end, falls back to heartbeat
+            new Date(Math.max(+startDate, +new Date(end) || +heartbeat)),
+          ],
+        };
+      });
+    }
+
+    static buildGroup(group) {
+      return {
+        label: group.label,
+        lines: OatSessionsTimeline.#buildLines(
+          group,
+          new Date(new Date(group.heartbeat).getTime() || Date.now()),
+        ),
+      };
+    }
+
+    static #buildLines(group, heartbeat) {
+      const sessions = group.sessions ?? [];
+      if (sessions.length === 0) {
+        return [];
+      }
+
+      if (!group.toKey) {
+        return [
+          {
+            label: group.label,
+            segments: OatSessionsTimeline.#buildSegments(
+              sessions,
+              group.toSegment,
+              heartbeat,
+            ),
+          },
+        ];
+      }
+
+      return [...Map.groupBy(sessions, group.toKey).values()]
+        .map((keyedSessions) => ({
+          label: String(group.toLabel(keyedSessions[0])),
+          segments: OatSessionsTimeline.#buildSegments(
+            keyedSessions,
+            group.toSegment,
+            heartbeat,
+          ),
+        }))
+        .toSorted((a, b) => a.label.localeCompare(b.label));
+    }
+
+    static #chartDataToKey(chartData) {
+      return chartData
+        .map(
+          (group) =>
+            `${group.group}:${group.data.map((line) => line.label).join("|")}`,
+        )
+        .join(";");
+    }
+
+    #options;
+    #groups;
+    #totalLineCount = 0;
+    #dataStart;
+    #dataEnd;
+    #placeholderChartData;
+    #hiddenLines = new Set();
+
+    #containerElement;
+    #presetsElement;
+    #rangeElement;
+    #chartElement;
+    #emptyElement;
+    #filtersElement;
+
+    #chart;
+    #currentDomain;
+    #appliedFilterKey = null;
+    #appliedWidth = 0;
+
+    constructor(options) {
+      this.#options = options;
+      this.#setupGroups();
+
+      // nothing to draw
+      if (this.#groups.length === 0) {
+        return;
+      }
+
+      this.#setupBounds();
+      this.#setupPlaceholderChartData();
+      this.#setupInitialDomain();
+      this.#setupElements();
+      this.#setupChart();
+      this.#setupResizeObserver();
+      this.#setupZoomPresets();
+      this.#setupFilters();
+      this.#applyFilters();
+    }
+
+    #setupGroups() {
+      this.#groups = (this.#options.groups ?? []).filter(
+        (group) => group.lines.length > 0,
+      );
+
+      this.#totalLineCount = this.#groups.reduce(
+        (count, group) => count + group.lines.length,
+        0,
+      );
+    }
+
+    #setupBounds() {
+      this.#dataStart = Infinity;
+      this.#dataEnd = -Infinity;
+      for (const group of this.#groups) {
+        for (const line of group.lines) {
+          for (const segment of line.segments) {
+            this.#dataStart = Math.min(this.#dataStart, +segment.timeRange[0]);
+            this.#dataEnd = Math.max(this.#dataEnd, +segment.timeRange[1]);
+          }
+        }
+      }
+
+      this.#dataStart = new Date(this.#dataStart);
+      this.#dataEnd = new Date(this.#dataEnd);
+    }
+
+    #setupPlaceholderChartData() {
+      this.#placeholderChartData = [
+        {
+          group: "",
+          data: [
+            {
+              label: "",
+              data: [
+                {
+                  // spans every segment so the zoom slider still covers the full history
+                  timeRange: [this.#dataStart, this.#dataEnd],
+                  val: OatSessionsTimeline.#PLACEHOLDER_SEGMENT_VAL,
+                },
+              ],
+            },
+          ],
+        },
+      ];
+    }
+
+    #setupInitialDomain() {
+      this.#currentDomain = [
+        new Date(
+          +this.#dataEnd - OatSessionsTimeline.#DEFAULT_ZOOM_PRESET.viewSizeMs,
+        ),
+        this.#dataEnd,
+      ];
+    }
+
+    #setupElements() {
+      this.#containerElement = this.#options.container;
+
+      const fragment = OatSessionsTimeline.#cloneTemplate(
+        OatSessionsTimeline.#TEMPLATE_ID,
+      );
+      this.#presetsElement = fragment.querySelector("[data-oat-presets]");
+      this.#rangeElement = fragment.querySelector("[data-oat-range]");
+      this.#chartElement = fragment.querySelector("[data-oat-chart]");
+      this.#emptyElement = fragment.querySelector("[data-oat-empty]");
+      this.#filtersElement = fragment.querySelector("[data-oat-filters]");
+
+      this.#containerElement.appendChild(fragment);
+    }
+
+    #setupChart() {
+      const initialChartData = this.#buildChartData(null);
+      this.#appliedFilterKey =
+        OatSessionsTimeline.#chartDataToKey(initialChartData);
+
+      this.#chart = TimelinesChart()(this.#chartElement)
+        .data(initialChartData)
+        .maxHeight(OatSessionsTimeline.#MAX_CHART_HEIGHT_PX)
+        .maxLineHeight(OatSessionsTimeline.#LINE_HEIGHT_PX)
+        .zQualitative(true)
+        .zColorScale(this.#zColorScaleCallback.bind(this))
+        .useUtc(false)
+        .enableAnimations(false)
+        .zoomX(this.#currentDomain)
+        .segmentTooltipContent(this.#segmentTooltipContentCallback.bind(this))
+        .width(this.#chartElement.clientWidth)
+        .onZoom(this.#onZoomCallback.bind(this));
+    }
+
+    #setupResizeObserver() {
+      this.#appliedWidth = this.#chartElement.clientWidth;
+
+      const resizeObserver = new ResizeObserver(() => {
+        const width = this.#chartElement.clientWidth;
+        if (width > 0 && width !== this.#appliedWidth) {
+          this.#appliedWidth = width;
+          this.#chart.width(width);
+        }
+      });
+      resizeObserver.observe(this.#containerElement);
+    }
+
+    #setupZoomPresets() {
+      for (const preset of OatSessionsTimeline.#ZOOM_PRESETS) {
+        this.#presetsElement.appendChild(
+          OatSessionsTimeline.#createButton(preset.label, () =>
+            this.#zoomTo([
+              new Date(+this.#dataEnd - preset.viewSizeMs),
+              this.#dataEnd,
+            ]),
+          ),
+        );
+      }
+    }
+
+    #setupFilters() {
+      for (const group of this.#groups) {
+        // a 1-element group needs no filters
+        if (group.lines.length > 1) {
+          this.#setupFilterSection(group);
+        }
+      }
+    }
+
+    #setupFilterSection(group) {
+      const section = OatSessionsTimeline.#cloneTemplateElement(
+        OatSessionsTimeline.#FILTER_GROUP_TEMPLATE_ID,
+      );
+      section.querySelector("[data-oat-heading]").textContent =
+        `Toggle visibility - ${group.label}`;
+
+      const checkboxesElement = section.querySelector("[data-oat-checkboxes]");
+      const entries = group.lines.map((line) => {
+        const label = OatSessionsTimeline.#cloneTemplateElement(
+          OatSessionsTimeline.#CHECKBOX_TEMPLATE_ID,
+        );
+        const input = label.querySelector("input");
+        input.addEventListener("change", () => {
+          this.#setLineHidden(line, !input.checked);
+          this.#applyFilters();
+        });
+
+        label.append(line.label);
+        checkboxesElement.appendChild(label);
+
+        return { line, input };
+      });
+
+      const setAllChecked = (checked) => {
+        for (const { line, input } of entries) {
+          input.checked = checked;
+          this.#setLineHidden(line, !checked);
+        }
+        this.#applyFilters();
+      };
+
+      const bulkElement = section.querySelector("[data-oat-bulk]");
+      bulkElement.append(
+        OatSessionsTimeline.#createButton("Show all", () =>
+          setAllChecked(true),
+        ),
+        OatSessionsTimeline.#createButton("Hide all", () =>
+          setAllChecked(false),
+        ),
+      );
+
+      this.#filtersElement.appendChild(section);
+    }
+
+    #buildChartData(domain) {
+      const from = +(domain?.[0] ?? -Infinity);
+      const to = +(domain?.[1] ?? Infinity);
+
+      const chartData = [];
+      for (const group of this.#groups) {
+        const lines = group.lines.filter(
+          (line) =>
+            !this.#hiddenLines.has(line) &&
+            line.segments.some(
+              (segment) =>
+                +segment.timeRange[0] <= to && +segment.timeRange[1] >= from,
+            ),
+        );
+
+        if (lines.length > 0) {
+          chartData.push({
+            group: group.label,
+            data: lines.map((line) => ({
+              label: line.label,
+              data: line.segments,
+            })),
+          });
+        }
+      }
+
+      return chartData;
+    }
+
+    #setLineHidden(line, isHidden) {
+      if (isHidden) {
+        this.#hiddenLines.add(line);
+      } else {
+        this.#hiddenLines.delete(line);
+      }
+    }
+
+    #renderCurrentRange() {
+      const [start, end] = this.#currentDomain;
+
+      this.#rangeElement.textContent = `${OatSessionsTimeline.#TIME_RANGE_FORMAT.formatRange(start, end)} (${OatSessionsTimeline.#formatDuration(+end - +start)})`;
+    }
+
+    #applyFilters() {
+      this.#renderCurrentRange();
+
+      const filteredChartData = this.#buildChartData(this.#currentDomain);
+      const isEmpty = filteredChartData.length === 0;
+      const chartData = isEmpty
+        ? this.#placeholderChartData
+        : filteredChartData;
+
+      if (isEmpty) {
+        this.#emptyElement.textContent =
+          this.#hiddenLines.size === this.#totalLineCount
+            ? "No rows selected"
+            : "No data in the selected time range";
+      }
+      this.#emptyElement.classList.toggle("is-hidden", !isEmpty);
+
+      const key = OatSessionsTimeline.#chartDataToKey(chartData);
+      if (key === this.#appliedFilterKey) {
+        return;
+      }
+      this.#appliedFilterKey = key;
+
+      this.#chart.maxLineHeight(
+        isEmpty
+          ? OatSessionsTimeline.#PLACEHOLDER_LINE_HEIGHT_PX
+          : OatSessionsTimeline.#LINE_HEIGHT_PX,
+      );
+      this.#chart.data(chartData);
+      this.#chart.zoomX(this.#currentDomain);
+      this.#chart.zoomY([null, null]);
+    }
+
+    #zoomTo(domain) {
+      this.#currentDomain = domain;
+      this.#chart.zoomX(domain);
+      this.#chart.zoomY([null, null]);
+      this.#applyFilters();
+    }
+
+    #zColorScaleCallback(val) {
+      if (val === OatSessionsTimeline.#PLACEHOLDER_SEGMENT_VAL) {
+        return "none";
+      }
+
+      const color = this.#options.toColor?.(val);
+      if (color) {
+        return color;
+      }
+
+      const { r, g, b } = OatSessionsTimeline.#hashToRGB(
+        OatSessionsTimeline.#stringToHash(val),
+      );
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    #segmentTooltipContentCallback({ data: segment }) {
+      const lines = [`<b>${OatSessionsTimeline.#escapeHTML(segment.val)}</b>`];
+
+      for (const line of this.#options.tooltip?.(segment) ?? []) {
+        lines.push(OatSessionsTimeline.#escapeHTML(line));
+      }
+
+      const [start, end] = segment.timeRange;
+      lines.push(
+        OatSessionsTimeline.#TIME_RANGE_FORMAT.formatRange(start, end),
+      );
+      lines.push(
+        `Duration: ${OatSessionsTimeline.#formatDuration(+end - +start)}`,
+      );
+
+      return lines.join("<br>");
+    }
+
+    #onZoomCallback(xDomain) {
+      this.#currentDomain = xDomain;
+      this.#chart.zoomY([null, null]);
+      this.#applyFilters();
+    }
+  }
+
+  window.OatSessionsTimeline = OatSessionsTimeline;
+</script>
+{{end}}

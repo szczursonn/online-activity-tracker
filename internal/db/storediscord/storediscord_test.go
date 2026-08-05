@@ -26,7 +26,7 @@ func newTestDB(t *testing.T) *db.DB {
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(database.Close)
-	if err := database.RunMigrations(t.Context()); err != nil {
+	if err := database.RunMigrations(t.Context(), db.MigrationHooks{}); err != nil {
 		t.Fatalf("db.RunMigrations: %v", err)
 	}
 	return database

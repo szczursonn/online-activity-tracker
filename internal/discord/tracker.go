@@ -13,7 +13,7 @@ import (
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/szczursonn/online-activity-tracker/internal/db"
 	"github.com/szczursonn/online-activity-tracker/internal/db/storediscord"
-	"github.com/szczursonn/online-activity-tracker/internal/loglevellimit"
+	"github.com/szczursonn/online-activity-tracker/internal/logs/loglevellimit"
 )
 
 const errPrefix = "discord: "
@@ -26,7 +26,7 @@ type TrackerOptions struct {
 
 func (opts *TrackerOptions) applyDefaultsAndValidate() error {
 	if opts.Logger == nil {
-		opts.Logger = slog.Default()
+		opts.Logger = slog.New(slog.DiscardHandler)
 	}
 
 	if opts.DB == nil {
@@ -48,9 +48,9 @@ type Tracker struct {
 	taskQueue     chan func()
 	hasContinuity bool
 
-	ctx       context.Context
-	cancelCtx context.CancelFunc
-	doneCh    chan struct{}
+	ctx                        context.Context
+	cancelCtx                  context.CancelFunc
+	gatewayClosedPermanentlyCh chan error
 }
 
 func NewTracker(ctx context.Context, opts TrackerOptions) (*Tracker, error) {
@@ -59,17 +59,17 @@ func NewTracker(ctx context.Context, opts TrackerOptions) (*Tracker, error) {
 	}
 
 	t := &Tracker{
-		logger:    opts.Logger.With(slog.String("module", "discord")),
-		db:        opts.DB,
-		taskQueue: make(chan func(), 500),
-		doneCh:    make(chan struct{}),
+		logger:                     opts.Logger,
+		db:                         opts.DB,
+		taskQueue:                  make(chan func(), 500),
+		gatewayClosedPermanentlyCh: make(chan error, 1),
 	}
 	t.ctx, t.cancelCtx = context.WithCancel(context.Background())
 
 	var err error
 	t.client, err = disgo.New(opts.Token,
 		bot.WithLogger(
-			slog.New(loglevellimit.NewLevelLimitHandler(opts.Logger.Handler(), slog.LevelWarn)).With(slog.String("module", "discord/disgo")),
+			slog.New(loglevellimit.NewLevelLimitHandler(opts.Logger.Handler(), slog.LevelWarn)).With(slog.String("module", "disgo")),
 		),
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(
@@ -80,8 +80,10 @@ func NewTracker(ctx context.Context, opts TrackerOptions) (*Tracker, error) {
 			),
 			gateway.WithAutoReconnect(true),
 			gateway.WithCloseHandler(func(_ gateway.Gateway, err error, _ bool) {
-				t.logger.Error("Discord gateway closed and cannot reconnect", slog.Any("err", err))
-				t.cancelCtx()
+				select {
+				case t.gatewayClosedPermanentlyCh <- fmt.Errorf(errPrefix+"gateway closed and cannot reconnect: %w", err):
+				default:
+				}
 			}),
 		),
 		bot.WithEventListeners(&events.ListenerAdapter{
@@ -107,30 +109,24 @@ func NewTracker(ctx context.Context, opts TrackerOptions) (*Tracker, error) {
 		return nil, fmt.Errorf(errPrefix+"opening discord gateway: %w", err)
 	}
 
-	go t.worker()
-
 	return t, nil
 }
 
-func (t *Tracker) InitShutdown() {
+func (t *Tracker) Close() {
 	t.cancelCtx()
+	t.client.Close(context.Background())
 }
 
-func (t *Tracker) Done() <-chan struct{} {
-	return t.doneCh
-}
-
-func (t *Tracker) worker() {
-	defer close(t.doneCh)
-	defer t.client.Close(context.Background())
-
+func (t *Tracker) Run(ctx context.Context) error {
 	heartbeatTicker := time.NewTicker(3 * time.Second)
 	defer heartbeatTicker.Stop()
 
 	for {
 		select {
-		case <-t.ctx.Done():
-			return
+		case <-ctx.Done():
+			return nil
+		case err := <-t.gatewayClosedPermanentlyCh:
+			return err
 		case <-heartbeatTicker.C:
 			if t.client.Gateway.Status() == gateway.StatusReady {
 				ts := time.Now()

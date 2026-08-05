@@ -27,7 +27,7 @@ func newTestDB(t *testing.T) *db.DB {
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(database.Close)
-	if err := database.RunMigrations(t.Context()); err != nil {
+	if err := database.RunMigrations(t.Context(), db.MigrationHooks{}); err != nil {
 		t.Fatalf("db.RunMigrations: %v", err)
 	}
 	return database
@@ -61,8 +61,8 @@ func disableUser(t *testing.T, database *db.DB, userID uint64, ts time.Time) {
 	})
 }
 
-func intPtr(v int) *int             { return &v }
-func uint64Ptr(v uint64) *uint64    { return &v }
+func intPtr(v int) *int          { return &v }
+func uint64Ptr(v uint64) *uint64 { return &v }
 
 // ---------- row inspection ----------
 
@@ -360,48 +360,6 @@ func TestDisableUser_ZeroIDReturnsError(t *testing.T) {
 
 // ---------- extra info / page-data getters ----------
 
-func TestUpdateUserExtraInfo_VisibleInGetUsersPageData(t *testing.T) {
-	d := newTestDB(t)
-	enableUser(t, d, 1)
-	enableUser(t, d, 2)
-	enableUser(t, d, 3)
-	enableUser(t, d, 4)
-
-	writeTx(t, d, func(tx *db.Tx) error {
-		if err := storesteam.UpdateUserExtraInfo(tx, 1, "Bob", "", "av1", time.UnixMilli(10)); err != nil {
-			return err
-		}
-		if err := storesteam.UpdateUserExtraInfo(tx, 2, "alice", "", "av2", time.UnixMilli(10)); err != nil {
-			return err
-		}
-		if err := storesteam.UpdateUserExtraInfo(tx, 3, "Charlie", "", "av3", time.UnixMilli(10)); err != nil {
-			return err
-		}
-		// User 4 left with the default empty name.
-		return nil
-	})
-
-	var res *storesteam.GetUsersPageDataResult
-	readTx(t, d, func(tx *db.Tx) error {
-		var err error
-		res, err = storesteam.GetUsersPageData(tx)
-		return err
-	})
-	if len(res.Users) != 4 {
-		t.Fatalf("expected 4 users, got %+v", res.Users)
-	}
-	// Order: empty name first (id 4), then alice (2), Bob (1), Charlie (3) — case-insensitive.
-	wantOrder := []uint64{4, 2, 1, 3}
-	for i, u := range res.Users {
-		if u.ID != wantOrder[i] {
-			t.Errorf("user %d: want id=%d, got %+v", i, wantOrder[i], u)
-		}
-	}
-	if res.Users[1].Name != "alice" || res.Users[1].AvatarURL != "av2" {
-		t.Errorf("alice fields wrong: %+v", res.Users[1])
-	}
-}
-
 func TestGetEnabledUserIDs_ExcludesDisabled(t *testing.T) {
 	d := newTestDB(t)
 	enableUser(t, d, 1)
@@ -424,44 +382,6 @@ func TestGetEnabledUserIDs_ExcludesDisabled(t *testing.T) {
 	}
 	if !got[1] || !got[3] {
 		t.Errorf("expected users 1 and 3 in enabled list: %+v", ids)
-	}
-}
-
-func TestUpdateAppExtraInfo_VisibleInGetAppPageData(t *testing.T) {
-	d := newTestDB(t)
-	enableUser(t, d, 1)
-	// Get an app row inserted via a sync.
-	writeTx(t, d, func(tx *db.Tx) error {
-		return storesteam.SyncAppSessions(tx, time.UnixMilli(0), time.UnixMilli(0),
-			map[uint64]*uint64{1: uint64Ptr(500)})
-	})
-
-	writeTx(t, d, func(tx *db.Tx) error {
-		return storesteam.UpdateAppExtraInfo(tx, 500, "Counter-Strike", "https://img", time.UnixMilli(100))
-	})
-
-	var page *storesteam.GetAppPageDataResult
-	readTx(t, d, func(tx *db.Tx) error {
-		var err error
-		page, err = storesteam.GetAppPageData(tx, 500)
-		return err
-	})
-	if page.ID != 500 || page.Name != "Counter-Strike" || page.HeaderImageURL != "https://img" {
-		t.Errorf("unexpected page: %+v", page)
-	}
-}
-
-func TestGetAppPageData_NotFoundReturnsErrNotFound(t *testing.T) {
-	d := newTestDB(t)
-	err := d.ReadTx(context.Background(), func(tx *db.Tx) error {
-		_, err := storesteam.GetAppPageData(tx, 999)
-		if !errors.Is(err, db.ErrNotFound) {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("expected db.ErrNotFound, got %v", err)
 	}
 }
 

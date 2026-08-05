@@ -107,21 +107,14 @@ func DisableUser(tx *db.Tx, userID uint64, closeSessionsAt time.Time) error {
 	return nil
 }
 
-type GetUsersPageDataResult struct {
-	Users []GetUsersPageDataResultUser `json:"users"`
+type GetAllUsersUser struct {
+	ID        uint64
+	Name      string
+	AvatarURL string
 }
 
-type GetUsersPageDataResultUser struct {
-	ID        uint64 `json:"id,string"`
-	Name      string `json:"name,omitempty"`
-	AvatarURL string `json:"avatar_url,omitempty"`
-}
-
-func GetUsersPageData(tx *db.Tx) (*GetUsersPageDataResult, error) {
-	res := &GetUsersPageDataResult{}
-
-	var err error
-	res.Users, err = func() ([]GetUsersPageDataResultUser, error) {
+func GetAllUsers(tx *db.Tx) ([]GetAllUsersUser, error) {
+	users, err := func() ([]GetAllUsersUser, error) {
 		rows, err := tx.Query(`
 			SELECT id, name, avatar_url
 			FROM discord_user
@@ -132,7 +125,7 @@ func GetUsersPageData(tx *db.Tx) (*GetUsersPageDataResult, error) {
 		}
 		defer rows.Close()
 
-		var res []GetUsersPageDataResultUser
+		var users []GetAllUsersUser
 		for rows.Next() {
 			var userID int64
 			var name string
@@ -141,20 +134,20 @@ func GetUsersPageData(tx *db.Tx) (*GetUsersPageDataResult, error) {
 				return nil, err
 			}
 
-			res = append(res, GetUsersPageDataResultUser{
+			users = append(users, GetAllUsersUser{
 				ID:        uint64(userID),
 				Name:      name,
 				AvatarURL: avatarURL,
 			})
 		}
 
-		return res, rows.Err()
+		return users, rows.Err()
 	}()
 	if err != nil {
 		return nil, fmt.Errorf(errPrefix+"getting all users: %w", err)
 	}
 
-	return res, nil
+	return users, nil
 }
 
 func CloseAllSessions(tx *db.Tx, ts time.Time) error {
@@ -653,68 +646,6 @@ func ResetGuildState(tx *db.Tx, ts time.Time, p *ResetGuildStateParam) error {
 	return nil
 }
 
-type GetAllVoiceSessionsForUserResultEntry struct {
-	ID              int64
-	ChannelID       uint64
-	ChannelName     string
-	GuildID         uint64
-	GuildName       string
-	StartObservedAt int64
-	EndObservedAt   int64
-}
-
-func GetAllVoiceSessionsForUser(tx *db.Tx, userID uint64) ([]GetAllVoiceSessionsForUserResultEntry, error) {
-	res, err := func() ([]GetAllVoiceSessionsForUserResultEntry, error) {
-		rows, err := tx.Query(`
-			SELECT dsv.id, dc.id, dc.name, dg.id, dg.name, dsv.start_observed_at, dsv.end_observed_at
-			FROM discord_session_voice dsv
-			LEFT JOIN discord_channel dc ON dsv.channel_id = dc.id
-			LEFT JOIN discord_guild dg ON dc.guild_id = dg.id
-			WHERE dsv.user_id = ?;
-		`, int64(userID))
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-
-		entries := []GetAllVoiceSessionsForUserResultEntry{}
-		for rows.Next() {
-			var id int64
-			var channelID int64
-			var channelName string
-			var guildID int64
-			var guildName string
-			var startObservedAt int64
-			var endObservedAtPtr *int64
-			if err := rows.Scan(&id, &channelID, &channelName, &guildID, &guildName, &startObservedAt, &endObservedAtPtr); err != nil {
-				return nil, err
-			}
-
-			var endObservedAt int64
-			if endObservedAtPtr != nil {
-				endObservedAt = *endObservedAtPtr
-			}
-
-			entries = append(entries, GetAllVoiceSessionsForUserResultEntry{
-				ID:              id,
-				ChannelID:       uint64(channelID),
-				ChannelName:     channelName,
-				GuildID:         uint64(guildID),
-				GuildName:       guildName,
-				StartObservedAt: startObservedAt,
-				EndObservedAt:   endObservedAt,
-			})
-		}
-
-		return entries, rows.Err()
-	}()
-	if err != nil {
-		return nil, fmt.Errorf(errPrefix+"getting all voice sessions for user %d: %w", userID, err)
-	}
-
-	return res, nil
-}
-
 type GetUserPageDataResult struct {
 	Heartbeat        time.Time                              `json:"heartbeat,omitzero"`
 	User             GetUserPageDataResultUser              `json:"user"`
@@ -919,6 +850,147 @@ func GetUserPageData(tx *db.Tx, userID uint64) (*GetUserPageDataResult, error) {
 	}()
 	if err != nil {
 		return nil, fmt.Errorf(errPrefix+"getting all voice sessions for user %d: %w", userID, err)
+	}
+
+	return res, nil
+}
+
+type GetAllGuildsGuild struct {
+	ID      uint64
+	Name    string
+	IconURL string
+}
+
+func GetAllGuilds(tx *db.Tx) ([]GetAllGuildsGuild, error) {
+	guilds, err := func() ([]GetAllGuildsGuild, error) {
+		rows, err := tx.Query(`
+			SELECT id, name, icon_url
+			FROM discord_guild
+			ORDER BY name COLLATE NOCASE ASC, id ASC;
+		`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		var guilds []GetAllGuildsGuild
+		for rows.Next() {
+			var guildID int64
+			var name string
+			var iconURL string
+			if err := rows.Scan(&guildID, &name, &iconURL); err != nil {
+				return nil, err
+			}
+
+			guilds = append(guilds, GetAllGuildsGuild{
+				ID:      uint64(guildID),
+				Name:    name,
+				IconURL: iconURL,
+			})
+		}
+
+		return guilds, rows.Err()
+	}()
+	if err != nil {
+		return nil, fmt.Errorf(errPrefix+"getting all guilds: %w", err)
+	}
+
+	return guilds, nil
+}
+
+type GetGuildPageDataResult struct {
+	Heartbeat     time.Time                            `json:"heartbeat,omitzero"`
+	Guild         GetGuildPageDataResultGuild          `json:"guild"`
+	VoiceSessions []GetGuildPageDataResultVoiceSession `json:"voice_sessions"`
+}
+
+type GetGuildPageDataResultGuild struct {
+	ID      uint64 `json:"id,string"`
+	Name    string `json:"name,omitempty"`
+	IconURL string `json:"icon_url,omitempty"`
+}
+
+type GetGuildPageDataResultVoiceSession struct {
+	ID              int64     `json:"id,string"`
+	UserID          uint64    `json:"user_id,string"`
+	UserName        string    `json:"user_name,omitzero"`
+	ChannelID       uint64    `json:"channel_id,string"`
+	ChannelName     string    `json:"channel_name,omitzero"`
+	StartObservedAt time.Time `json:"start_observed_at,omitzero"`
+	EndObservedAt   time.Time `json:"end_observed_at,omitzero"`
+}
+
+func GetGuildPageData(tx *db.Tx, guildID uint64) (*GetGuildPageDataResult, error) {
+	res := &GetGuildPageDataResult{
+		Guild: GetGuildPageDataResultGuild{
+			ID: guildID,
+		},
+	}
+
+	var err error
+	res.Heartbeat, err = GetHeartbeat(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.QueryRow(`
+			SELECT name, icon_url
+			FROM discord_guild
+			WHERE id = ?;
+		`, int64(guildID)).Scan(&res.Guild.Name, &res.Guild.IconURL); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, db.ErrNotFound
+		}
+
+		return nil, fmt.Errorf(errPrefix+"getting guild extra info %d: %w", guildID, err)
+	}
+
+	res.VoiceSessions, err = func() ([]GetGuildPageDataResultVoiceSession, error) {
+		rows, err := tx.Query(`
+			SELECT dsv.id, du.id, du.name, dc.id, dc.name, dsv.start_observed_at, dsv.end_observed_at
+			FROM discord_session_voice dsv
+			JOIN discord_channel dc ON dsv.channel_id = dc.id
+			LEFT JOIN discord_user du ON dsv.user_id = du.id
+			WHERE dc.guild_id = ?;
+		`, int64(guildID))
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		entries := []GetGuildPageDataResultVoiceSession{}
+		for rows.Next() {
+			var id int64
+			var userID int64
+			var userName string
+			var channelID int64
+			var channelName string
+			var startObservedAtNum int64
+			var endObservedAtNumPtr *int64
+			if err := rows.Scan(&id, &userID, &userName, &channelID, &channelName, &startObservedAtNum, &endObservedAtNumPtr); err != nil {
+				return nil, err
+			}
+
+			var endObservedAt time.Time
+			if endObservedAtNumPtr != nil {
+				endObservedAt = time.UnixMilli(*endObservedAtNumPtr)
+			}
+
+			entries = append(entries, GetGuildPageDataResultVoiceSession{
+				ID:              id,
+				UserID:          uint64(userID),
+				UserName:        userName,
+				ChannelID:       uint64(channelID),
+				ChannelName:     channelName,
+				StartObservedAt: time.UnixMilli(startObservedAtNum),
+				EndObservedAt:   endObservedAt,
+			})
+		}
+
+		return entries, rows.Err()
+	}()
+	if err != nil {
+		return nil, fmt.Errorf(errPrefix+"getting all voice sessions for guild %d: %w", guildID, err)
 	}
 
 	return res, nil
