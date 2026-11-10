@@ -17,32 +17,8 @@ func (t *Tracker) handleVoiceStateUpdateEvent(event *events.GuildVoiceStateUpdat
 		GuildID: uint64(event.VoiceState.GuildID),
 	}
 
-	if cachedMember, ok := t.client.Caches.Member(event.VoiceState.GuildID, event.VoiceState.UserID); ok {
-		p.UserExtraInfo = &storediscord.SyncVoiceParamUserExtraInfo{
-			Name:      cachedMember.User.EffectiveName(),
-			AvatarURL: cachedMember.User.EffectiveAvatarURL(),
-		}
-	}
-
-	if cachedGuild, ok := t.client.Caches.Guild(event.VoiceState.GuildID); ok {
-		var iconURL string
-		if iconURLPtr := cachedGuild.IconURL(); iconURLPtr != nil {
-			iconURL = *iconURLPtr
-		}
-
-		p.GuildExtraInfo = &storediscord.SyncVoiceParamGuildExtraInfo{
-			Name:    cachedGuild.Name,
-			IconURL: iconURL,
-		}
-	}
-
 	if event.VoiceState.ChannelID != nil {
 		p.ChannelID = uint64(*event.VoiceState.ChannelID)
-		if cachedChannel, ok := t.client.Caches.Channel(*event.VoiceState.ChannelID); ok {
-			p.ChannelExtraInfo = &storediscord.SyncVoiceParamChannelExtraInfo{
-				Name: cachedChannel.Name(),
-			}
-		}
 	}
 
 	t.enqueueTask(func() { t.applyVoiceStateUpdateEvent(p, ts) })

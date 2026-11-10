@@ -21,25 +21,6 @@ func (t *Tracker) handlePresenceUpdateEvent(event *events.PresenceUpdate) {
 		Activities:    make([]storediscord.SyncPresenceParamActivity, 0, len(event.Presence.Activities)),
 	}
 
-	if cachedMember, ok := t.client.Caches.Member(event.Presence.GuildID, event.PresenceUser.ID); ok {
-		p.UserExtraInfo = &storediscord.SyncPresenceParamUserExtraInfo{
-			Name:      cachedMember.User.EffectiveName(),
-			AvatarURL: cachedMember.User.EffectiveAvatarURL(),
-		}
-	}
-
-	if cachedGuild, ok := t.client.Caches.Guild(event.Presence.GuildID); ok {
-		var iconURL string
-		if iconURLPtr := cachedGuild.IconURL(); iconURLPtr != nil {
-			iconURL = *iconURLPtr
-		}
-
-		p.GuildExtraInfo = &storediscord.SyncPresenceParamGuildExtraInfo{
-			Name:    cachedGuild.Name,
-			IconURL: iconURL,
-		}
-	}
-
 	for _, activity := range event.Presence.Activities {
 		var details string
 		if activity.Details != nil {

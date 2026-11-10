@@ -113,6 +113,8 @@
   "use strict";
   class OatSessionsTimeline {
     static #ZOOM_PRESETS = Object.freeze([
+      { label: "60m", viewSizeMs: 60 * 60 * 1000 },
+      { label: "6h", viewSizeMs: 6 * 60 * 60 * 1000 },
       { label: "24h", viewSizeMs: 24 * 60 * 60 * 1000 },
       { label: "48h", viewSizeMs: 2 * 24 * 60 * 60 * 1000 },
       { label: "7d", viewSizeMs: 7 * 24 * 60 * 60 * 1000 },

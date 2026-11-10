@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/disgoorg/disgo/discord"
-	"github.com/disgoorg/disgo/events"
 	"github.com/szczursonn/online-activity-tracker/internal/db"
 	"github.com/szczursonn/online-activity-tracker/internal/db/storediscord"
 )
@@ -14,21 +13,9 @@ type GuildSnapshotVoiceState struct {
 	ChannelID uint64
 }
 
-func (t *Tracker) handleGuildJoinEvent(event *events.GuildJoin) {
+func (t *Tracker) handleGuildCreateGatewayEvent(gatewayGuild *discord.GatewayGuild) {
 	ts := time.Now()
-	snap := buildGuildSnapshot(&event.Guild)
-	t.enqueueTask(func() { t.applyGuildTrackableEvent(snap, ts) })
-}
-
-func (t *Tracker) handleGuildAvailableEvent(event *events.GuildAvailable) {
-	ts := time.Now()
-	snap := buildGuildSnapshot(&event.Guild)
-	t.enqueueTask(func() { t.applyGuildTrackableEvent(snap, ts) })
-}
-
-func (t *Tracker) handleGuildReadyEvent(event *events.GuildReady) {
-	ts := time.Now()
-	snap := buildGuildSnapshot(&event.Guild)
+	snap := buildGuildSnapshot(gatewayGuild)
 	t.enqueueTask(func() { t.applyGuildTrackableEvent(snap, ts) })
 }
 

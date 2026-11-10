@@ -243,30 +243,18 @@ func CloseAllSessionsForGuildAndUser(tx *db.Tx, guildID uint64, userID uint64, t
 }
 
 type SyncPresenceParam struct {
-	DesktopStatus  int
-	MobileStatus   int
-	WebStatus      int
-	UserID         uint64
-	UserExtraInfo  *SyncPresenceParamUserExtraInfo
-	GuildID        uint64
-	GuildExtraInfo *SyncPresenceParamGuildExtraInfo
-	Activities     []SyncPresenceParamActivity
+	DesktopStatus int
+	MobileStatus  int
+	WebStatus     int
+	UserID        uint64
+	GuildID       uint64
+	Activities    []SyncPresenceParamActivity
 }
 
 type SyncPresenceParamActivity struct {
 	Name    string
 	Details string
 	State   string
-}
-
-type SyncPresenceParamUserExtraInfo struct {
-	Name      string
-	AvatarURL string
-}
-
-type SyncPresenceParamGuildExtraInfo struct {
-	Name    string
-	IconURL string
 }
 
 func SyncPresence(tx *db.Tx, ts time.Time, p *SyncPresenceParam) error {
@@ -283,20 +271,8 @@ func SyncPresence(tx *db.Tx, ts time.Time, p *SyncPresenceParam) error {
 		return fmt.Errorf(errPrefix+"checking user enabled for presence in guild %d: %w", p.GuildID, err)
 	}
 
-	if p.UserExtraInfo != nil {
-		if err := updateUserExtraInfo(tx, p.UserID, p.UserExtraInfo.Name, p.UserExtraInfo.AvatarURL, ts); err != nil {
-			return err
-		}
-	}
-
-	if p.GuildExtraInfo == nil {
-		if err := ensureGuildInserted(tx, p.GuildID); err != nil {
-			return err
-		}
-	} else {
-		if err := upsertGuild(tx, p.GuildID, p.GuildExtraInfo.Name, p.GuildExtraInfo.IconURL, ts); err != nil {
-			return err
-		}
+	if err := ensureGuildInserted(tx, p.GuildID); err != nil {
+		return err
 	}
 
 	statusSession := &struct {
@@ -402,26 +378,9 @@ func SyncPresence(tx *db.Tx, ts time.Time, p *SyncPresenceParam) error {
 }
 
 type SyncVoiceParam struct {
-	UserID           uint64
-	UserExtraInfo    *SyncVoiceParamUserExtraInfo
-	GuildID          uint64
-	GuildExtraInfo   *SyncVoiceParamGuildExtraInfo
-	ChannelID        uint64
-	ChannelExtraInfo *SyncVoiceParamChannelExtraInfo
-}
-
-type SyncVoiceParamUserExtraInfo struct {
-	Name      string
-	AvatarURL string
-}
-
-type SyncVoiceParamGuildExtraInfo struct {
-	Name    string
-	IconURL string
-}
-
-type SyncVoiceParamChannelExtraInfo struct {
-	Name string
+	UserID    uint64
+	GuildID   uint64
+	ChannelID uint64
 }
 
 func SyncVoice(tx *db.Tx, ts time.Time, p *SyncVoiceParam) error {
@@ -438,31 +397,13 @@ func SyncVoice(tx *db.Tx, ts time.Time, p *SyncVoiceParam) error {
 		return fmt.Errorf(errPrefix+"checking user %d enabled for voice: %w", p.UserID, err)
 	}
 
-	if p.UserExtraInfo != nil {
-		if err := updateUserExtraInfo(tx, p.UserID, p.UserExtraInfo.Name, p.UserExtraInfo.AvatarURL, ts); err != nil {
-			return err
-		}
-	}
-
-	if p.GuildExtraInfo == nil {
-		if err := ensureGuildInserted(tx, p.GuildID); err != nil {
-			return err
-		}
-	} else {
-		if err := upsertGuild(tx, p.GuildID, p.GuildExtraInfo.Name, p.GuildExtraInfo.IconURL, ts); err != nil {
-			return err
-		}
+	if err := ensureGuildInserted(tx, p.GuildID); err != nil {
+		return err
 	}
 
 	if p.ChannelID != 0 {
-		if p.ChannelExtraInfo == nil {
-			if err := ensureChannelInserted(tx, p.ChannelID, p.GuildID); err != nil {
-				return err
-			}
-		} else {
-			if err := upsertChannel(tx, p.ChannelID, p.GuildID, p.ChannelExtraInfo.Name, ts); err != nil {
-				return err
-			}
+		if err := ensureChannelInserted(tx, p.ChannelID, p.GuildID); err != nil {
+			return err
 		}
 	}
 

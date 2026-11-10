@@ -8,6 +8,7 @@ import (
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/bot/handlers"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
@@ -66,6 +67,16 @@ func NewTracker(ctx context.Context, opts TrackerOptions) (*Tracker, error) {
 	}
 	t.ctx, t.cancelCtx = context.WithCancel(context.Background())
 
+	// disgo's join/available/ready events only carry guild metadata, event though GUILD_CREATE has more stuff
+	gatewayHandlers := handlers.GetGatewayHandlers()
+	defaultGuildCreateHandler := gatewayHandlers[gateway.EventTypeGuildCreate]
+	gatewayHandlers[gateway.EventTypeGuildCreate] = bot.NewGatewayEventHandler(gateway.EventTypeGuildCreate,
+		func(client *bot.Client, sequenceNumber int, shardID int, event gateway.EventGuildCreate) {
+			t.handleGuildCreateGatewayEvent(&event.GatewayGuild)
+			defaultGuildCreateHandler.HandleGatewayEvent(client, sequenceNumber, shardID, event)
+		},
+	)
+
 	var err error
 	t.client, err = disgo.New(opts.Token,
 		bot.WithLogger(
@@ -86,12 +97,10 @@ func NewTracker(ctx context.Context, opts TrackerOptions) (*Tracker, error) {
 				}
 			}),
 		),
+		bot.WithEventManagerConfigOpts(bot.WithGatewayHandlers(gatewayHandlers)),
 		bot.WithEventListeners(&events.ListenerAdapter{
 			OnReady:                 t.handleReadyEvent,
-			OnGuildJoin:             t.handleGuildJoinEvent,
 			OnGuildLeave:            t.handleGuildLeaveEvent,
-			OnGuildAvailable:        t.handleGuildAvailableEvent,
-			OnGuildReady:            t.handleGuildReadyEvent,
 			OnGuildUnavailable:      t.handleGuildUnavailableEvent,
 			OnGuildMemberLeave:      t.handleGuildMemberLeaveEvent,
 			OnPresenceUpdate:        t.handlePresenceUpdateEvent,
